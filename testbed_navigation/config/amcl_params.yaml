@@ -1,0 +1,77 @@
+# =============================================================================
+#  AMCL (nav2_amcl) - Adaptive Monte-Carlo Localization
+#  Publishes map -> odom so that map -> odom -> base_footprint is complete.
+#  Docs: https://docs.nav2.org/configuration/packages/configuring-amcl.html
+#
+#  Robot facts used below (from testbed_description):
+#    * differential drive, base frame = base_footprint, odom frame = odom
+#    * 2D lidar on topic /scan, 300 beams over 360 deg, range 0.10 - 12.0 m
+#    * spawned in Gazebo at x=0.0, y=5.0, yaw=0.0 (testbed_gazebo/launch/spawn_testbed.launch.py)
+#    * the map's origin [-10.2, -9.94] was chosen so that map frame == Gazebo world frame
+#      (verified by overlaying the world's walls on the map image), so the spawn pose IS
+#      the initial pose in the map frame.
+# =============================================================================
+amcl:
+  ros__parameters:
+    use_sim_time: true
+
+    # ---------------- frames & topics ----------------
+    global_frame_id: "map"
+    odom_frame_id: "odom"
+    base_frame_id: "base_footprint"
+    scan_topic: scan
+    map_topic: map
+    tf_broadcast: true            # publish map -> odom
+    transform_tolerance: 1.0      # post-date the map->odom TF by this much (s)
+
+    # ---------------- initial pose ----------------
+    # Start the filter at the known spawn pose so the robot is localized immediately.
+    # (You can still re-seed it from RViz with "2D Pose Estimate".)
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 5.0
+      z: 0.0
+      yaw: 0.0
+    always_reset_initial_pose: false
+    first_map_only: false
+
+    # ---------------- motion model ----------------
+    # Differential-drive odometry model. alpha1..alpha4 = expected odometry noise:
+    #   alpha1: rot error from rot,   alpha2: rot error from trans,
+    #   alpha3: trans error from trans, alpha4: trans error from rot.
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.2                   # only used by the omni model
+
+    # ---------------- particle filter ----------------
+    min_particles: 500
+    max_particles: 2000
+    pf_err: 0.05                  # KLD-sampling error bound
+    pf_z: 0.99                    # KLD-sampling confidence
+    resample_interval: 1          # resample after every filter update
+    recovery_alpha_slow: 0.0      # 0.0 disables random-particle injection (no kidnapping recovery);
+    recovery_alpha_fast: 0.0      #   try 0.001 / 0.1 if you want global recovery
+    update_min_d: 0.2             # only update the filter after moving 0.20 m ...
+    update_min_a: 0.2             # ... or rotating 0.2 rad (~11 deg)
+    save_pose_rate: 0.5
+
+    # ---------------- laser (sensor) model ----------------
+    laser_model_type: "likelihood_field"
+    laser_min_range: 0.10         # = sensor <range><min>
+    laser_max_range: 12.0         # = sensor <range><max>
+    max_beams: 60                 # beams used per update (sub-sampled from 300)
+    laser_likelihood_max_dist: 2.0
+    sigma_hit: 0.2
+    z_hit: 0.5
+    z_short: 0.05
+    z_max: 0.05
+    z_rand: 0.5
+    lambda_short: 0.1
+    do_beamskip: false
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3

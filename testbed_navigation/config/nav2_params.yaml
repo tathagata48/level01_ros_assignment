@@ -1,0 +1,350 @@
+# =============================================================================
+#  Nav2 navigation servers for Testbed-T1.0.0 (ROS 2 Humble, Nav2 1.1.x)
+#
+#  Servers configured here (all are lifecycle nodes started by navigation.launch.py):
+#    planner_server     -> global planner   : nav2_navfn_planner/NavfnPlanner
+#    controller_server  -> local planner    : dwb_core::DWBLocalPlanner
+#    behavior_server    -> recoveries       : Spin, BackUp, DriveOnHeading, Wait
+#    bt_navigator       -> behavior tree    : behavior_trees/navigate_to_pose_testbed.xml
+#    waypoint_follower  -> multi-goal missions
+#    velocity_smoother  -> limits jerk / acceleration of the controller output
+#    collision_monitor  -> last safety layer before the wheels
+#
+#  Velocity pipeline:
+#    controller_server / behavior_server --cmd_vel_nav--> velocity_smoother
+#      --cmd_vel_smoothed--> collision_monitor --cmd_vel--> gazebo diff-drive plugin
+#
+#  Robot geometry (base_footprint = ground point under the wheel-axle midpoint):
+#    body  x: -0.175 .. +0.175 m   (0.35 m long)
+#    body  y: -0.203 .. +0.203 m   (0.41 m wide incl. wheels)
+#    -> inscribed radius ~0.18 m, circumscribed radius ~0.27 m
+#  Smallest passages in the test world: door openings ~0.75 - 0.90 m wide.
+# =============================================================================
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    bt_loop_duration: 10              # ms per BT tick
+    default_server_timeout: 20        # ms to wait for an action server reply
+    wait_for_service_timeout: 1000
+    enable_groot_monitoring: false
+    # default_nav_to_pose_bt_xml is set by navigation.launch.py to the absolute path of
+    # behavior_trees/navigate_to_pose_testbed.xml (needs a package-share path).
+    # default_nav_through_poses_bt_xml is left at the Nav2 default.
+    #
+    # Every BT node type used by the behavior trees must be loaded from its plugin library:
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_battery_charging_condition_bt_node
+
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: true
+
+bt_navigator_navigate_to_pose_rclcpp_node:
+  ros__parameters:
+    use_sim_time: true
+
+# -----------------------------------------------------------------------------
+#  Controller server + DWB local planner
+# -----------------------------------------------------------------------------
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5     # diff-drive: no lateral velocity
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5   # must move 0.5 m ...
+      movement_time_allowance: 10.0   # ... every 10 s, else the BT triggers recoveries
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.10         # m
+      yaw_goal_tolerance: 0.10        # rad (~6 deg)
+
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: false
+      # velocity limits (diff drive => no y)
+      min_vel_x: 0.0
+      max_vel_x: 0.30
+      min_vel_y: 0.0
+      max_vel_y: 0.0
+      max_vel_theta: 1.0
+      min_speed_xy: 0.0
+      max_speed_xy: 0.30
+      min_speed_theta: 0.0
+      # acceleration limits - keep identical to velocity_smoother so DWB's plans are trackable
+      acc_lim_x: 1.0
+      acc_lim_y: 0.0
+      acc_lim_theta: 2.0
+      decel_lim_x: -1.0
+      decel_lim_y: 0.0
+      decel_lim_theta: -2.0
+      # trajectory sampling
+      vx_samples: 20
+      vy_samples: 1
+      vtheta_samples: 20
+      sim_time: 1.7
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.2
+      xy_goal_tolerance: 0.10
+      trans_stopped_velocity: 0.25
+      short_circuit_trajectory_evaluation: true
+      stateful: true
+      # trajectory critics (cost terms) and their weights
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.02
+      PathAlign.scale: 32.0
+      PathAlign.forward_point_distance: 0.1
+      GoalAlign.scale: 24.0
+      GoalAlign.forward_point_distance: 0.1
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+
+# -----------------------------------------------------------------------------
+#  Local costmap (odom frame, rolling window around the robot)
+# -----------------------------------------------------------------------------
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: odom
+      robot_base_frame: base_footprint
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      rolling_window: true
+      width: 4
+      height: 4
+      resolution: 0.05
+      # rectangular footprint (base_footprint frame), see geometry notes at the top
+      footprint: "[[0.185, 0.215], [0.185, -0.215], [-0.185, -0.215], [-0.185, 0.215]]"
+      footprint_padding: 0.01
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          max_obstacle_height: 2.0
+          obstacle_min_range: 0.0
+          obstacle_max_range: 3.5
+          raytrace_min_range: 0.0
+          raytrace_max_range: 4.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.55          # > circumscribed radius (0.27 m)
+        cost_scaling_factor: 4.0
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+#  Global costmap (map frame, size of the static map)
+# -----------------------------------------------------------------------------
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      global_frame: map
+      robot_base_frame: base_footprint
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      resolution: 0.05
+      track_unknown_space: true
+      footprint: "[[0.185, 0.215], [0.185, -0.215], [-0.185, -0.215], [-0.185, 0.215]]"
+      footprint_padding: 0.01
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true   # receive the latched /map from map_server
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: "LaserScan"
+          marking: true
+          clearing: true
+          max_obstacle_height: 2.0
+          obstacle_min_range: 0.0
+          obstacle_max_range: 5.0
+          raytrace_min_range: 0.0
+          raytrace_max_range: 6.0
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.55
+        cost_scaling_factor: 4.0
+      always_send_full_costmap: true
+
+# -----------------------------------------------------------------------------
+#  Planner server + NavFn global planner
+# -----------------------------------------------------------------------------
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 5.0   # BT replans at 1 Hz; NavFn needs ~0.1 s on this 20x20 m map
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5          # m, accept the closest reachable point if the goal cell is blocked
+      use_astar: false        # Dijkstra (slightly smoother paths in open rooms)
+      allow_unknown: true
+
+# -----------------------------------------------------------------------------
+#  Behavior (recovery) server
+# -----------------------------------------------------------------------------
+behavior_server:
+  ros__parameters:
+    use_sim_time: true
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    global_frame: odom
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 2.0
+
+# -----------------------------------------------------------------------------
+#  Waypoint follower (used by RViz "Waypoint / Nav Through Poses" mode)
+# -----------------------------------------------------------------------------
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: true
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200    # ms
+
+# -----------------------------------------------------------------------------
+#  Velocity smoother: cmd_vel_nav -> cmd_vel_smoothed
+# -----------------------------------------------------------------------------
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: true
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.30, 0.0, 1.0]
+    min_velocity: [-0.30, 0.0, -1.0]
+    max_accel: [1.0, 0.0, 2.0]
+    max_decel: [-1.0, 0.0, -2.0]
+    odom_topic: "odom"
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+# -----------------------------------------------------------------------------
+#  Collision monitor: cmd_vel_smoothed -> cmd_vel (last safety layer)
+#  Docs: https://docs.nav2.org/configuration/packages/configuring-collision-monitor.html
+# -----------------------------------------------------------------------------
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel"
+    transform_tolerance: 0.5
+    source_timeout: 5.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    # Only an "approach" polygon is used on purpose. It forward-simulates the CURRENT
+    # command with the robot footprint, so it is direction-aware: driving towards a
+    # wall is slowed down, but rotating or backing away from it is still allowed.
+    # (A fixed "stop" box would freeze the robot for good - recoveries included - if the
+    # controller ever parked it next to a wall.)
+    polygons: ["FootprintApproach"]
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: "/local_costmap/published_footprint"
+      time_before_collision: 1.0      # keep >= 1.0 s between the footprint and any scan point
+      simulation_time_step: 0.1
+      max_points: 5
+      visualize: false
+      enabled: true
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "/scan"
+      enabled: true

@@ -1,0 +1,55 @@
+<!--
+  Behavior tree used by bt_navigator for NavigateToPose goals on Testbed-T1.0.0.
+
+  Based on Nav2's navigate_to_pose_w_replanning_and_recovery.xml (Humble), kept deliberately
+  simple ("basic navigational functionality"):
+
+  MainTree
+  └─ RecoveryNode (up to 6 retries of the whole navigation)
+     ├─ PipelineSequence "NavigateWithReplanning"
+     │   ├─ RateController 1 Hz ─ ComputePathToPose (planner_server / GridBased = NavFn)
+     │   │                         └─ on failure: clear the global costmap once and retry
+     │   └─ FollowPath (controller_server / FollowPath = DWB)
+     │                             └─ on failure: clear the local costmap once and retry
+     └─ ReactiveFallback "RecoveryFallback"  (runs when the pipeline fails)
+         ├─ GoalUpdated            -> skip recoveries if the user sent a new goal
+         └─ RoundRobin (one recovery per failure, cycling):
+             1. clear both costmaps
+             2. Spin 90 deg          (behavior_server / spin)
+             3. Wait 3 s             (behavior_server / wait)
+             4. BackUp 0.25 m        (behavior_server / backup)
+
+  Node names (ComputePathToPose, FollowPath, Spin, ...) are BT plugins listed in
+  bt_navigator.plugin_lib_names; planner_id / controller_id must match the plugin
+  names declared in planner_server.planner_plugins / controller_server.controller_plugins.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <Spin spin_dist="1.57"/>
+          <Wait wait_duration="3"/>
+          <BackUp backup_dist="0.25" backup_speed="0.05"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
