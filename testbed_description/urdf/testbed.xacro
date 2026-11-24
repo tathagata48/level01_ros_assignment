@@ -143,19 +143,19 @@
 
 <link name="lidar_link_1">
   <inertial>
-    <origin xyz="-0.04570340676333076 -0.21275884889245775 -0.06900465054505728" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
     <mass value="0.26337542011370024"/>
     <inertia ixx="0.000153" iyy="0.000153" izz="0.000267" ixy="0.0" iyz="0.0" ixz="-0.0"/>
   </inertial>
   <visual>
-    <origin xyz="0.04 0.033 -0.226509" rpy="0 0 0"/>
+    <origin xyz="0.0457 0.0378 -0.2375" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/lidar_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="silver"/>
   </visual>
   <collision>
-    <origin xyz="0.04 0.033 -0.226509" rpy="0 0 0"/>
+    <origin xyz="0.0457 0.0378 -0.2375" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/lidar_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
@@ -164,19 +164,19 @@
 
 <link name="imu_link_1">
   <inertial>
-    <origin xyz="-0.21570340676333022 -0.3447588488924569 -0.0820046505450562" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
     <mass value="0.008832000000000027"/>
     <inertia ixx="1e-06" iyy="1e-06" izz="2e-06" ixy="0.0" iyz="-0.0" ixz="-0.0"/>
   </inertial>
   <visual>
-    <origin xyz="0.1 -0.05 -0.1612" rpy="0 0 0"/>
+    <origin xyz="0.0957 0.1238 -0.1595" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/imu_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="silver"/>
   </visual>
   <collision>
-    <origin xyz="0.1 -0.05 -0.1612" rpy="0 0 0"/>
+    <origin xyz="0.0957 0.1238 -0.1595" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/imu_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
@@ -185,19 +185,19 @@
 
 <link name="dummy_link_1">
   <inertial>
-    <origin xyz="-0.21570340676332594 -0.08475884889245736 -0.08200465054505635" rpy="0 0 0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
     <mass value="0.008832000000000027"/>
     <inertia ixx="1e-06" iyy="1e-06" izz="2e-06" ixy="-0.0" iyz="0.0" ixz="0.0"/>
   </inertial>
   <visual>
-    <origin xyz="0.1 0.14 -0.1612" rpy="0 0 0"/>
+    <origin xyz="0.0957 -0.0462 -0.1595" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/dummy_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
     <material name="silver"/>
   </visual>
   <collision>
-    <origin xyz="0.1 0.14 -0.1612" rpy="0 0 0"/>
+    <origin xyz="0.0957 -0.0462 -0.1595" rpy="0 0 0"/>
     <geometry>
       <mesh filename="file://$(find testbed_description)/meshes/dummy_link_1.stl" scale="0.001 0.001 0.001"/>
     </geometry>
@@ -225,10 +225,12 @@
   </collision>
 </link>
 
+<!-- FIX: base_footprint was not under the axle midpoint, so the robot frame translated
+     while spinning in place. base_link's CAD origin is 0.0505 m behind / 0.0378 m right of it. -->
 <joint name="fixed_base_joint" type="fixed">
   <parent link="base_footprint" />
   <child link="base_link" />
-  <origin xyz="0 0 0" rpy="0 0 0" />
+  <origin xyz="0.0505 0.0378 0" rpy="0 0 0" />
 </joint>
 
 <joint name="left_wheel_joint" type="continuous">
@@ -262,20 +264,23 @@
   <child link="caster_4"/>
 </joint>
 
+<!-- FIX: lidar frame moved onto the sensor's optical centre (CAD mesh centre) -->
 <joint name="lidar_joint" type="fixed">
-  <origin xyz="-0.04 -0.04 0.228" rpy="0 0 0"/>
+  <origin xyz="-0.0457 -0.0378 0.2375" rpy="0 0 0"/>
   <parent link="base_link"/>
   <child link="lidar_link_1"/>
 </joint>
 
+<!-- FIX: imu_joint and dummy_joint origins were swapped: imu_link_1 sat on the dummy board
+     and its mesh was drawn 17 cm away. Both frames now sit on the centre of their own mesh. -->
 <joint name="imu_joint" type="fixed">
-  <origin xyz="-0.1 0.05 0.163" rpy="0 0 0"/>
+  <origin xyz="-0.0957 -0.1238 0.1595" rpy="0 0 0"/>
   <parent link="base_link"/>
   <child link="imu_link_1"/>
 </joint>
 
 <joint name="dummy_joint" type="fixed">
-  <origin xyz="-0.1 -0.1315 0.163" rpy="0 0 0"/>
+  <origin xyz="-0.0957 0.0462 0.1595" rpy="0 0 0"/>
   <parent link="base_link"/>
   <child link="dummy_link_1"/>
 </joint>
