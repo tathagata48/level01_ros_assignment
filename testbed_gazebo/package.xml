@@ -11,6 +11,9 @@
 
   <depend>rclpy</depend>
   <depend>testbed_description</depend>
+  <!-- FIX: launch files use gazebo_ros (gazebo.launch.py, spawn_entity.py) -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_plugins</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
