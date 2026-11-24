@@ -1,0 +1,195 @@
+===============================================================================
+ Level 1 ROS 2 Navigation Assignment - bugs found in the starter code
+===============================================================================
+Environment used for testing: ROS 2 Humble, Nav2 1.1.20, Gazebo Classic 11,
+CycloneDDS. Every bug below was reproduced first and the fix was then verified
+by re-running the same check. "Evidence" shows the exact symptom.
+
+Summary
+-------
+ #   Severity     File                                              Problem
+ 1   BLOCKING     testbed_description/CMakeLists.txt                ament_package missing "()" -> build fails
+ 2   BLOCKING     testbed_bringup/maps/testbed_world.yaml           map image path is wrong
+ 3   BLOCKING     testbed_bringup/CMakeLists.txt                    maps/ folder never installed
+ 4   FUNCTIONAL   testbed_description/urdf/testbed.gazebo           lidar range only 1.5 m
+ 5   FUNCTIONAL   testbed_description/urdf/testbed.gazebo           ROS 1 plugin libgazebo_ros_control.so
+ 6   FUNCTIONAL   testbed_description/urdf/testbed.gazebo           wrong wheel_separation (0.35 instead of 0.376)
+ 7   FUNCTIONAL   testbed_description/urdf/testbed.xacro            base_footprint not under the wheel axle
+ 8   FUNCTIONAL   testbed_description/launch/robot_description.launch.py   no use_sim_time, URDF not passed as string
+ 9   FUNCTIONAL   testbed_description/launch/testbed_rviz_barebones.launch.py URDF not passed as string
+10   MODEL        testbed_description/urdf/testbed.xacro            imu_link_1 / dummy_link_1 frames swapped
+11   MODEL        testbed_description/urdf/testbed.xacro            lidar/IMU/dummy inertials placed outside the robot
+12   PACKAGING    testbed_gazebo/CMakeLists.txt                     models/ folder never installed
+13   PACKAGING    testbed_*/package.xml                             missing runtime dependencies
+14   COSMETIC     testbed_description/urdf/testbed.gazebo           stray ">" in the IMU plugin block
+
+
+-------------------------------------------------------------------------------
+1. testbed_description/CMakeLists.txt - `ament_package` is not called
+-------------------------------------------------------------------------------
+Found by : first `colcon build` of the unmodified repo.
+Evidence : CMake Error at CMakeLists.txt:24: Parse error. Expected "(", got newline
+           -> testbed_description failed, testbed_bringup aborted, nothing builds.
+Cause    : the last line is `ament_package` instead of `ament_package()`.
+Fix      : ament_package()
+Verified : `colcon build` -> 4 packages finished, 0 failed.
+
+-------------------------------------------------------------------------------
+2. testbed_bringup/maps/testbed_world.yaml - wrong image file name
+-------------------------------------------------------------------------------
+Found by : reading the map YAML next to the files in maps/.
+Evidence : `image: wrong_path_testbed_world.pgm` but the folder only contains
+           testbed_world.pgm, so nav2_map_server fails to load the map.
+Fix      : image: testbed_world.pgm   (relative paths are resolved next to the YAML)
+Verified : map_server log "Read map .../testbed_world.pgm: 405 X 400 map @ 0.05 m/cell",
+           /map published with origin (-10.2, -9.94).
+
+-------------------------------------------------------------------------------
+3. testbed_bringup/CMakeLists.txt - maps/ is not installed
+-------------------------------------------------------------------------------
+Found by : `ls install/testbed_bringup/share/testbed_bringup/` after building -> only launch/.
+Evidence : any launch file that finds the map with
+           get_package_share_directory('testbed_bringup') + '/maps/testbed_world.yaml'
+           points at a file that does not exist.
+Fix      : added `maps` to the install(DIRECTORY ...) list.
+Verified : install/testbed_bringup/share/testbed_bringup/maps/ now contains the .yaml and .pgm.
+
+-------------------------------------------------------------------------------
+4. testbed.gazebo - lidar maximum range is only 1.5 m
+-------------------------------------------------------------------------------
+Found by : `ros2 topic echo --once /scan --field range_max` -> 1.5
+Evidence : the world is 20 m x 20 m with rooms ~10 m wide. With 1.5 m range almost
+           every beam returns "max range", so AMCL has almost nothing to match against
+           the map, and the costmaps see obstacles only at the last moment.
+Fix      : <max>12.0</max>   (AMCL laser_max_range set to the same value)
+Verified : range_max = 12.0; laser points line up with the map walls in RViz;
+           AMCL converges from a 0.74 m / 24 deg initial error within 2.5 m of driving.
+
+-------------------------------------------------------------------------------
+5. testbed.gazebo - ROS 1 plugin `libgazebo_ros_control.so`
+-------------------------------------------------------------------------------
+Found by : running gzserver with --verbose.
+Evidence : [Err] [Plugin.hh:212] Failed to load plugin libgazebo_ros_control.so:
+           libgazebo_ros_control.so: cannot open shared object file
+Cause    : that plugin only exists in ROS 1 (ROS 2 uses gazebo_ros2_control, which also
+           needs a <ros2_control> block). It is not needed here: the wheels are driven
+           by libgazebo_ros_diff_drive.so.
+Fix      : removed the <gazebo><plugin name="control" .../></gazebo> block.
+Verified : no plugin errors in the gzserver log.
+
+-------------------------------------------------------------------------------
+6. testbed.gazebo - wrong wheel_separation (0.35 m)
+-------------------------------------------------------------------------------
+Found by : open-loop drive test (command v/w for a fixed time, compare with /odom) and
+           by measuring the wheel meshes (tyre centres at y=+0.1502 and y=-0.2258 m).
+Evidence : command w = 0.80 rad/s -> robot turns at 0.740 rad/s (92.5 %).
+           0.35 / 0.376 = 0.93: the plugin converts w into wheel speeds with a
+           separation 7 % smaller than the real one, so every turn is 7 % short.
+Fix      : <wheel_separation>0.376</wheel_separation>
+Verified : command w = 0.80 rad/s -> measured 0.790 rad/s.
+
+-------------------------------------------------------------------------------
+7. testbed.xacro - base_footprint is not under the wheel-axle midpoint
+-------------------------------------------------------------------------------
+Found by : the same drive test (spin in place) + mesh bounding boxes.
+Evidence : spinning in place for 127 deg moved base_footprint by 11.3 cm.
+           base_link's CAD origin is 5.05 cm in front of and 3.78 cm left of the axle
+           midpoint, and fixed_base_joint had origin 0 0 0. Nav2 (controller, costmap
+           footprint, recoveries) assumes the robot rotates about base_footprint.
+Fix      : fixed_base_joint origin xyz="0.0505 0.0378 0" -> base_footprint is now the
+           point on the ground under the axle midpoint; the footprint becomes symmetric
+           (+-0.175 m x +-0.203 m).
+Verified : spin-in-place translation 0.1 cm (was 11.3 cm).
+
+-------------------------------------------------------------------------------
+8. robot_description.launch.py - no use_sim_time, URDF not passed as a string
+-------------------------------------------------------------------------------
+Found by : reading the launch file (every other node uses the Gazebo /clock).
+Evidence : robot_state_publisher runs on wall-clock time while Gazebo, AMCL and Nav2 use
+           sim time, so its TF stamps live on a different time base.
+           Also the xacro output was passed without ParameterValue(..., value_type=str),
+           so launch tries to parse the whole URDF as YAML (see bug 9).
+Fix      : `use_sim_time` launch argument (default true) passed to the node, and
+           robot_description wrapped in ParameterValue(Command(...), value_type=str).
+Verified : `ros2 param get /robot_state_publisher use_sim_time` -> True.
+
+-------------------------------------------------------------------------------
+9. testbed_rviz_barebones.launch.py - URDF not passed as a string
+-------------------------------------------------------------------------------
+Found by : the launch file crashed once the URDF contained a comment with ": " in it.
+Evidence : [ERROR] [launch]: Unable to parse the value of parameter robot_description
+           as yaml. If the parameter is meant to be a string, try wrapping it in
+           launch_ros.parameter_descriptions.ParameterValue(value, value_type=str)
+           The starter URDF only worked by luck (no "key: value"-looking text in it).
+Fix      : ParameterValue(Command(['xacro ', path]), value_type=str)
+Verified : the launch file starts, RViz RobotModel status OK.
+
+-------------------------------------------------------------------------------
+10. testbed.xacro - IMU and dummy frames are swapped
+-------------------------------------------------------------------------------
+Found by : computing every mesh's bounding box in the base_link frame and comparing it
+           with the joint origins (script in the PDF write-up).
+Evidence : imu_link_1's frame sat on the *dummy* board (y = +0.05 m) and its mesh was
+           drawn 17.4 cm away from its own frame; dummy_link_1 had the mirror problem
+           (18.6 cm). /imu messages (frame_id imu_link_1) were therefore stamped with
+           the wrong mounting position - a real problem as soon as an EKF uses the IMU.
+Fix      : imu_joint   xyz="-0.0957 -0.1238 0.1595", visual origin "0.0957 0.1238 -0.1595"
+           dummy_joint xyz="-0.0957  0.0462 0.1595", visual origin "0.0957 -0.0462 -0.1595"
+           (each frame now sits at the centre of its own mesh; meshes stay where the CAD has them)
+Verified : mesh centre expressed in its own frame = (0, 0, 0) for both links.
+
+-------------------------------------------------------------------------------
+11. testbed.xacro - inertial origins outside the robot (lidar, IMU, dummy)
+-------------------------------------------------------------------------------
+Evidence : e.g. lidar <inertial><origin xyz="-0.0457 -0.2128 -0.0690"> puts the lidar's
+           0.26 kg centre of mass 25 cm to the side of the robot, outside the chassis.
+           Same for imu_link_1 / dummy_link_1 (CAD exporter artefacts).
+Fix      : inertial origins set to the mesh centres ("0 0 0" in each link frame). The lidar
+           frame was also moved onto the sensor's optical centre (-0.0457 -0.0378 0.2375),
+           a 7 mm correction, with the visual origin adjusted so the mesh stays in place.
+Verified : check_urdf parses; mesh centres coincide with the frames.
+
+-------------------------------------------------------------------------------
+12. testbed_gazebo/CMakeLists.txt - models/ is not installed
+-------------------------------------------------------------------------------
+Evidence : spawn_playground.launch.py appends <share>/testbed_gazebo/models to
+           GAZEBO_MODEL_PATH, but only launch/ and worlds/ were installed, so that path
+           did not exist (any model:// include of these models would fail).
+Fix      : added `models` to install(DIRECTORY ...).
+
+-------------------------------------------------------------------------------
+13. package.xml - missing runtime dependencies
+-------------------------------------------------------------------------------
+Evidence : the launch files use xacro, robot_state_publisher, joint_state_publisher,
+           rviz2, gazebo_ros, gazebo_plugins and the other testbed packages, but none of
+           them are declared, so `rosdep install --from-paths src -y --ignore-src` does
+           not install them (testbed_rviz_barebones.launch.py failed with
+           "package 'joint_state_publisher' not found" on a fresh install).
+Fix      : added the <exec_depend> entries to testbed_description, testbed_gazebo and
+           testbed_bringup.
+
+-------------------------------------------------------------------------------
+14. testbed.gazebo - stray ">" in the IMU plugin
+-------------------------------------------------------------------------------
+Evidence : <initial_orientation_as_reference>false</initial_orientation_as_reference>>
+Fix      : removed the extra ">".
+
+
+Small enhancement (not a bug)
+-----------------------------
+* testbed_bringup/launch/testbed_full_bringup.launch.py: new `use_rviz` argument
+  (default true) so the navigation RViz can be used instead of the bring-up one.
+
+Observed but deliberately NOT changed
+-------------------------------------
+* .vscode/settings.json contains a path from the author's machine - harmless.
+* testbed_description files use Windows (CRLF) line endings - kept so the diff of the
+  real fixes stays small and reviewable.
+* The four casters are fixed links of 1.18 kg each (4.7 of the robot's 7.4 kg). That is
+  unrealistic, but the drive test shows the robot tracks commanded velocity (1.191 m
+  travelled for 1.200 m commanded), so the physics were left alone.
+* Gazebo prints "[Err] [Sensor.cc:520] Get noise index not valid" for the IMU (no noise
+  model defined) - harmless.
+* The diff-drive plugin uses its default odometry_source = world, so /odom is ground
+  truth and the odom frame starts at the spawn pose (0, 5). Set <odometry_source>0
+  </odometry_source> for encoder-based odometry if a more realistic test is wanted.
